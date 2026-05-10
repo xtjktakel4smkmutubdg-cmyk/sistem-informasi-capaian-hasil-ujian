@@ -7,6 +7,7 @@ import { differenceInSeconds } from 'date-fns';
 
 export default function Dashboard() {
   const [results, setResults] = useState([]);
+    const [student, setStudent] = useState(null);
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const [isRevealed, setIsRevealed] = useState(false);
@@ -16,15 +17,20 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const initRef = useRef(false);
 
-  const fetchResults = useCallback(async () => {
+  const fetchResults = useCallback(async (sessionUser) => {
     try {
+      if (!sessionUser) return;
+
+      const { data: subjs, error: subjsError } = await supabase.from('mata_pelajaran').select('nama');
+      if (!subjsError && subjs) {
+        // setSubjects is not needed here if mapped from scores
+
+      }
+
       const { data, error } = await supabase
-        .from('results')
-        .select(`
-          *,
-          users:user_id (id, nama, username, no_peserta)
-        `)
-        .order('created_at', { ascending: false });
+        .from('student_results')
+        .select('*')
+        .eq('user_id', sessionUser.id);
 
       if (error) throw error;
 
@@ -46,25 +52,16 @@ export default function Dashboard() {
 
   const checkUser = useCallback(async () => {
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-
-      if (!session) {
+      const sessionStr = localStorage.getItem('student_session');
+      if (!sessionStr) {
         navigate('/login');
         return;
       }
 
-      const { error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', session.user.id)
-        .single();
+      const sessionData = JSON.parse(sessionStr);
+      setStudent(sessionData);
 
-      if (userError && userError.code !== 'PGRST116') {
-         console.warn("Could not fetch user profile from users table", userError);
-      }
-
-      fetchResults();
+      fetchResults(sessionData);
     } catch (err) {
       console.error('Auth error:', err);
       navigate('/login');
@@ -106,7 +103,7 @@ export default function Dashboard() {
   }, [releaseDate]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem('student_session');
     navigate('/login');
   };
 
@@ -222,9 +219,9 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <h3 className="text-xl font-bold text-slate-800">
-                            {result.users?.nama || 'Nama Tidak Diketahui'}
+                            {student?.nama || 'Nama Tidak Diketahui'}
                           </h3>
-                          <p className="text-slate-500 text-sm">NIS: {result.users?.username || result.users?.no_peserta || '-'}</p>
+                          <p className="text-slate-500 text-sm">NIS: {student?.username || '-'}</p>
                         </div>
                       </div>
                       <div className="mt-4 sm:mt-0 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-full text-sm font-semibold border border-emerald-100">

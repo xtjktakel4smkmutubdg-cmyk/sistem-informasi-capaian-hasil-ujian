@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 import { motion } from 'framer-motion';
 import {
-  Users, FileSpreadsheet, UploadCloud, Settings,
-  LogOut, Search, Filter, Save, Calendar, Eye, EyeOff, Activity
+  Users, FileSpreadsheet, Settings,
+  LogOut, Search, Save, Calendar, Eye, EyeOff, Activity, Trash2, Plus
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer
@@ -17,12 +17,13 @@ export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState('data-entry');
   const [students, setStudents] = useState([]);
   const [results, setResults] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const navigate = useNavigate();
   const initRef = useRef(false);
 
   // Data Entry State
   const [selectedStudent, setSelectedStudent] = useState('');
-  const [scores, setScores] = useState({ Matematika: 0, 'Bahasa Indonesia': 0, 'Bahasa Inggris': 0 });
+  const [scores, setScores] = useState({});
   const [teacherNotes, setTeacherNotes] = useState('');
 
   // Publication State
@@ -31,13 +32,17 @@ export default function AdminPanel() {
 
   // Management State
   const [searchQuery, setSearchQuery] = useState('');
+  const [newStudent, setNewStudent] = useState({ nama: '', username: '', password: '' });
+  const [csvText, setCsvText] = useState('');
+
+  // Settings State
+  const [newSubject, setNewSubject] = useState('');
 
   const fetchInitialData = useCallback(async () => {
     try {
-      // Check auth
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        navigate('/login');
+        navigate('/admin');
         return;
       }
 
@@ -48,34 +53,40 @@ export default function AdminPanel() {
         .single();
 
       if (userData?.role !== 'admin') {
-        navigate('/dashboard');
+        navigate('/login');
         return;
       }
-      // Assuming simple admin check or separate route for now
 
-      // Fetch users (students)
-      const { data: usersData, error: usersError } = await supabase
-        .from('users')
-        .select('*');
-      if (!usersError && usersData) {
-        setStudents(usersData);
+      // Fetch dynamic subjects
+      const { data: subjs } = await supabase.from('mata_pelajaran').select('*').order('created_at');
+      if (subjs) {
+        setSubjects(subjs);
+        const initScores = {};
+        subjs.forEach(s => initScores[s.nama] = 0);
+        setScores(initScores);
       }
 
+      // Fetch users (students from usercapaian)
+      const { data: usersData } = await supabase.from('usercapaian').select('*');
+      if (usersData) setStudents(usersData);
+
       // Fetch results
-      const { data: resultsData, error: resultsError } = await supabase
-        .from('results')
-        .select('*, users:user_id(nama, username, no_peserta)')
+      const { data: resultsData } = await supabase
+        .from('student_results')
+        .select('*, usercapaian!inner(nama, username)')
         .order('created_at', { ascending: false });
 
-      if (!resultsError && resultsData) {
+      if (resultsData) {
         setResults(resultsData);
-        // Assuming global release date or just taking from the first result
         if (resultsData.length > 0) {
           if (resultsData[0].release_at) {
              const d = new Date(resultsData[0].release_at);
-             // Format for datetime-local input: YYYY-MM-DDThh:mm
              const formattedDate = d.toISOString().slice(0, 16);
              setReleaseDate(formattedDate);
+             setIsPublished(d <= new Date());
+          } else {
+             setReleaseDate('');
+             setIsPublished(false);
           }
         }
       }
@@ -84,6 +95,7 @@ export default function AdminPanel() {
     }
   }, [navigate]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!initRef.current) {
       initRef.current = true;
@@ -91,6 +103,23 @@ export default function AdminPanel() {
     }
   }, [fetchInitialData]);
 
+  // Effect to populate scores when student changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (selectedStudent && results.length > 0) {
+       const existingResult = results.find(r => r.user_id === selectedStudent);
+       if (existingResult) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setScores(existingResult.scores || {});
+          setTeacherNotes(existingResult.teacher_notes || '');
+       } else {
+          const initScores = {};
+          subjects.forEach(s => initScores[s.nama] = 0);
+          setScores(initScores);
+          setTeacherNotes('');
+       }
+    }
+  }, [selectedStudent, results, subjects]);
 
 
   const handleScoreChange = (subject, value) => {
@@ -106,11 +135,9 @@ export default function AdminPanel() {
 
   const handleSaveResult = async () => {
     if (!selectedStudent) return alert('Pilih siswa terlebih dahulu');
-
     try {
       const avg = calculateAverage(scores);
-
-      const { error } = await supabase.from('results').upsert({
+      const { error } = await supabase.from('student_results').upsert({
         user_id: selectedStudent,
         scores,
         average_score: parseFloat(avg),
@@ -126,48 +153,130 @@ export default function AdminPanel() {
     }
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const handlePublishToggle = async () => {
+    const newState = !isPublished;
+    try {
+      if (newState) {
+        const nowStr = new Date().toISOString();
+        const { error } = await supabase.from('student_results').update({ release_at: nowStr }).neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error) throw error;
+        setIsPublished(true);
+        setReleaseDate(nowStr.slice(0, 16));
+        alert('Status publikasi diubah menjadi: Published (Sekarang)');
+      } else {
+        const { error } = await supabase.from('student_results').update({ release_at: null }).neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error) throw error;
+        setIsPublished(false);
+        setReleaseDate('');
+        alert('Status publikasi diubah menjadi: Hidden');
+      }
+      fetchInitialData();
+    } catch(e) {
+      alert('Error updating publication status: ' + e.message);
+    }
+  };
 
-    Papa.parse(file, {
-      header: true,
+  const handleScheduleSubmit = async () => {
+    if (!releaseDate) return alert('Silahkan pilih tanggal dan waktu rilis.');
+    try {
+      const scheduleDate = new Date(releaseDate).toISOString();
+      const { error } = await supabase.from('student_results').update({ release_at: scheduleDate }).neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+
+      const isNowPublished = new Date(releaseDate) <= new Date();
+      setIsPublished(isNowPublished);
+      alert('Jadwal rilis berhasil disimpan: ' + releaseDate);
+      fetchInitialData();
+    } catch (e) {
+      alert('Error saving schedule: ' + e.message);
+    }
+  };
+
+  // Student CRUD
+  const handleAddStudent = async () => {
+    if(!newStudent.nama || !newStudent.username || !newStudent.password) return alert('Lengkapi data siswa');
+    try {
+      const { error } = await supabase.from('usercapaian').insert([newStudent]);
+      if(error) throw error;
+      setNewStudent({ nama: '', username: '', password: '' });
+      fetchInitialData();
+      alert('Siswa berhasil ditambahkan');
+    } catch(e) { alert('Gagal menambah siswa: ' + e.message); }
+  };
+
+  const handleDeleteStudent = async (id) => {
+    if(!confirm('Yakin hapus siswa ini?')) return;
+    try {
+      await supabase.from('student_results').delete().eq('user_id', id);
+      const { error } = await supabase.from('usercapaian').delete().eq('id', id);
+      if(error) throw error;
+      fetchInitialData();
+    } catch(e) { alert('Gagal menghapus: ' + e.message); }
+  };
+
+
+    const handleBulkImportSubmit = () => {
+    if (!csvText.trim()) return alert('Data CSV kosong.');
+
+    Papa.parse(csvText, {
+      header: false,
+      skipEmptyLines: true,
       complete: async (results) => {
-        const data = results.data;
-        // In a real app, map CSV rows to users by NIS, then insert into results.
-        // Simplified here.
-        console.log("CSV Data:", data);
-        alert('Fitur Bulk Upload sedang disimulasikan. Data CSV terbaca.');
+        const rows = results.data;
+        const validData = rows.map(row => {
+          const nama = row[0]?.trim();
+          const username = row[1]?.trim();
+          if (!nama || !username) return null;
+          return {
+            nama,
+            username,
+            password: row[2]?.trim() || 'password123',
+            kelas: row[3]?.trim() || null,
+            no_peserta: row[4]?.trim() || null,
+          };
+        }).filter(Boolean);
+
+        if (validData.length === 0) {
+          return alert('Format tidak valid. Pastikan setidaknya Nama dan Username ada.');
+        }
+
+        try {
+          const { error } = await supabase.from('usercapaian').insert(validData);
+          if (error) throw error;
+
+          alert(`${validData.length} siswa berhasil ditambahkan!`);
+          setCsvText('');
+          fetchInitialData();
+        } catch (err) {
+          alert('Error saat import: ' + err.message);
+        }
       }
     });
   };
 
-  const handlePublishToggle = async () => {
-    const newState = !isPublished;
-    setIsPublished(newState);
-
-    // In a real scenario, this might update a `settings` table or set release_at to null/past date for all records
-    // Simplified: we'll update the release_at of all results to either a future date (if scheduled) or null/past if immediate
+  // Subject CRUD
+  const handleAddSubject = async () => {
+    if(!newSubject) return;
     try {
-        if (newState) {
-            // Publish now -> set release_at to now
-            const nowStr = new Date().toISOString();
-            await supabase.from('results').update({ release_at: nowStr }).neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-             // Unpublish -> set release_at to far future or null (if null means hidden in your logic)
-             // Using year 2099 as 'hidden'
-             await supabase.from('results').update({ release_at: '2099-12-31T23:59:59Z' }).neq('id', '00000000-0000-0000-0000-000000000000');
-        }
-        alert(`Status publikasi diubah menjadi: ${newState ? 'Published' : 'Hidden'}`);
-    } catch(e) {
-        console.error(e);
-    }
+      const { error } = await supabase.from('mata_pelajaran').insert([{ nama: newSubject }]);
+      if(error) throw error;
+      setNewSubject('');
+      fetchInitialData();
+    } catch(e) { alert('Gagal menambah mapel: ' + e.message); }
   };
 
+  const handleDeleteSubject = async (id) => {
+    if(!confirm('Yakin hapus mata pelajaran ini?')) return;
+    try {
+      const { error } = await supabase.from('mata_pelajaran').delete().eq('id', id);
+      if(error) throw error;
+      fetchInitialData();
+    } catch(e) { alert('Gagal menghapus: ' + e.message); }
+  };
 
-  const filteredResults = results.filter(r =>
-    r.users?.nama?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    r.users?.username?.includes(searchQuery)
+  const filteredStudents = students.filter(s =>
+    s.nama?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.username?.includes(searchQuery)
   );
 
   const statsData = [
@@ -192,6 +301,7 @@ export default function AdminPanel() {
             { id: 'data-entry', label: 'Data Entry', icon: FileSpreadsheet },
             { id: 'publication', label: 'Publication', icon: Calendar },
             { id: 'management', label: 'Student Management', icon: Users },
+            { id: 'settings', label: 'Settings', icon: Settings },
             { id: 'analytics', label: 'Analytics', icon: Activity },
           ].map(item => (
             <button
@@ -208,7 +318,7 @@ export default function AdminPanel() {
         </nav>
         <div className="p-4 border-t border-slate-800">
           <button
-            onClick={() => { supabase.auth.signOut(); navigate('/login'); }}
+            onClick={() => { supabase.auth.signOut(); navigate('/admin'); }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-colors"
           >
             <LogOut size={20} />
@@ -230,11 +340,9 @@ export default function AdminPanel() {
           {activeTab === 'data-entry' && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-slate-800">Data Entry Module</h2>
-
               <div className="grid md:grid-cols-2 gap-6">
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
                   <h3 className="text-lg font-semibold mb-4">Input Nilai Manual</h3>
-
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">Pilih Siswa</label>
@@ -243,24 +351,24 @@ export default function AdminPanel() {
                         onChange={(e) => setSelectedStudent(e.target.value)}
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
                       >
-                        <option value="">-- Pilih Siswa --</option>
+                        <option value="">Pilih siswa...</option>
                         {students.map(s => (
-                          <option key={s.id} value={s.id}>{s.nama} ({s.username || s.no_peserta})</option>
+                          <option key={s.id} value={s.id}>{s.nama} ({s.username})</option>
                         ))}
                       </select>
                     </div>
 
                     <div className="space-y-3">
-                      <label className="block text-sm font-medium text-slate-700">Nilai Mata Pelajaran</label>
-                      {Object.keys(scores).map(subject => (
-                        <div key={subject} className="flex items-center gap-4">
-                          <span className="w-1/3 text-sm text-slate-600">{subject}</span>
+                      {subjects.map((subj) => (
+                        <div key={subj.id}>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">{subj.nama}</label>
                           <input
                             type="number"
-                            min="0" max="100"
-                            value={scores[subject]}
-                            onChange={(e) => handleScoreChange(subject, e.target.value)}
-                            className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            min="0"
+                            max="100"
+                            value={scores[subj.nama] || ''}
+                            onChange={(e) => handleScoreChange(subj.nama, e.target.value)}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
                       ))}
@@ -282,25 +390,6 @@ export default function AdminPanel() {
                     </button>
                   </div>
                 </div>
-
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 h-fit">
-                  <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <UploadCloud size={20} className="text-emerald-500" />
-                    Bulk Upload (CSV)
-                  </h3>
-                  <p className="text-sm text-slate-500 mb-4">Unggah file CSV dengan format: NIS, Matematika, Bahasa Indonesia, Bahasa Inggris, Catatan</p>
-
-                  <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer relative">
-                    <input
-                      type="file"
-                      accept=".csv"
-                      onChange={handleFileUpload}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                    <UploadCloud size={40} className="mx-auto text-slate-400 mb-3" />
-                    <span className="text-slate-600 font-medium">Klik atau seret file kesini</span>
-                  </div>
-                </div>
               </div>
             </div>
           )}
@@ -309,7 +398,6 @@ export default function AdminPanel() {
           {activeTab === 'publication' && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-slate-800">Publication & Scheduling</h2>
-
               <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 max-w-2xl">
                 <div className="flex items-center justify-between mb-8">
                   <div>
@@ -325,7 +413,6 @@ export default function AdminPanel() {
                     {isPublished ? <><Eye size={20}/> Published</> : <><EyeOff size={20}/> Hidden</>}
                   </button>
                 </div>
-
                 <div className="border-t border-slate-100 pt-8">
                   <h3 className="text-lg font-semibold text-slate-800 mb-4">Jadwalkan Rilis</h3>
                   <div className="flex items-end gap-4">
@@ -339,7 +426,7 @@ export default function AdminPanel() {
                       />
                     </div>
                     <button
-                       onClick={() => alert(`Jadwal diatur ke: ${releaseDate}. (Implementasi simpan ke DB diperlukan)`)}
+                       onClick={handleScheduleSubmit}
                        className="px-6 py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800"
                     >
                       Set Jadwal
@@ -353,26 +440,72 @@ export default function AdminPanel() {
           {/* Management Tab */}
           {activeTab === 'management' && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-slate-800">Student & Grade Management</h2>
-              </div>
-
+              <h2 className="text-2xl font-bold text-slate-800">Student Management (usercapaian)</h2>
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+
+                <div className="mb-8 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                   <h3 className="font-semibold mb-4 text-slate-800">Tambah Siswa Baru</h3>
+                   <div className="flex flex-col sm:flex-row gap-4">
+                     <input type="text" placeholder="Nama" value={newStudent.nama} onChange={e=>setNewStudent({...newStudent, nama: e.target.value})} className="flex-1 p-2 rounded border" />
+                     <input type="text" placeholder="Username" value={newStudent.username} onChange={e=>setNewStudent({...newStudent, username: e.target.value})} className="flex-1 p-2 rounded border" />
+                     <input type="password" placeholder="Password" value={newStudent.password} onChange={e=>setNewStudent({...newStudent, password: e.target.value})} className="flex-1 p-2 rounded border" />
+                     <button onClick={handleAddStudent} className="px-4 py-2 bg-blue-600 text-white rounded-xl flex items-center gap-2"><Plus size={16}/> Tambah</button>
+                   </div>
+                </div>
+
+
+                <div className="mb-8 bg-white border border-slate-200 rounded-xl shadow-sm">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50 rounded-t-xl flex items-center justify-between">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <FileSpreadsheet size={18} className="text-slate-600" />
+                      Bulk Import Siswa
+                    </h3>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
+                      <p className="text-sm font-medium text-blue-900 mb-2">Format yang didukung (Setiap baris adalah satu pengguna):</p>
+                      <p className="text-sm text-blue-800 font-mono mb-2">Nama Lengkap, Username, Password, Kelas, No.Peserta</p>
+                      <p className="text-xs text-blue-700 opacity-80">* Kolom Password, Kelas, dan No.Peserta opsional. Default password: password123</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Data CSV (Paste di sini)</label>
+                      <textarea
+                        className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                        placeholder="Ahmad Fauzi, ahmad.fauzi, pass123, XII-IPA-1, 001&#10;Budi Santoso, budi.santoso, pass123, XII-IPA-1, 002"
+                        value={csvText}
+                        onChange={(e) => setCsvText(e.target.value)}
+                      ></textarea>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        onClick={() => setCsvText('')}
+                        className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium"
+                      >
+                        Tutup
+                      </button>
+                      <button
+                        onClick={handleBulkImportSubmit}
+                        className="px-4 py-2 bg-blue-400/90 hover:bg-blue-500 text-white rounded-lg transition-colors text-sm font-medium"
+                      >
+                        Mulai Import
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex flex-col sm:flex-row gap-4 mb-6">
                   <div className="relative flex-1">
                     <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
                       type="text"
-                      placeholder="Cari nama atau NIS..."
+                      placeholder="Cari nama atau username..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
-                  <button className="px-4 py-2.5 border border-slate-200 rounded-xl flex items-center gap-2 hover:bg-slate-50">
-                    <Filter size={18} />
-                    Filter
-                  </button>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -380,33 +513,51 @@ export default function AdminPanel() {
                     <thead>
                       <tr className="border-b border-slate-200 text-sm text-slate-500">
                         <th className="py-3 px-4 font-medium">Siswa</th>
-                        <th className="py-3 px-4 font-medium">NIS</th>
+                        <th className="py-3 px-4 font-medium">Username</th>
                         <th className="py-3 px-4 font-medium">Rata-rata</th>
-                        <th className="py-3 px-4 font-medium">Status</th>
                         <th className="py-3 px-4 font-medium">Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredResults.map((result) => (
-                        <tr key={result.id} className="border-b border-slate-100 hover:bg-slate-50">
-                          <td className="py-3 px-4 font-medium text-slate-800">{result.users?.nama}</td>
-                          <td className="py-3 px-4 text-slate-600">{result.users?.username || result.users?.no_peserta}</td>
-                          <td className="py-3 px-4 text-slate-800 font-semibold">{result.average_score}</td>
+                      {filteredStudents.map((student) => {
+                        const studentResult = results.find(r => r.user_id === student.id);
+                        return (
+                        <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="py-3 px-4 font-medium text-slate-800">{student.nama}</td>
+                          <td className="py-3 px-4 text-slate-600">{student.username}</td>
+                          <td className="py-3 px-4 text-slate-800 font-semibold">{studentResult ? studentResult.average_score : '-'}</td>
                           <td className="py-3 px-4">
-                            <span className={`px-2.5 py-1 text-xs rounded-full font-medium ${
-                              result.average_score >= 75 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                            }`}>
-                              {result.average_score >= 75 ? 'Lulus' : 'Remedial'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <button className="text-blue-600 hover:underline text-sm font-medium">Edit</button>
+                            <button onClick={() => handleDeleteStudent(student.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg">
+                              <Trash2 size={16} />
+                            </button>
                           </td>
                         </tr>
-                      ))}
+                      ) })}
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Settings Tab */}
+          {activeTab === 'settings' && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-slate-800">Dynamic Subjects Settings</h2>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 max-w-2xl">
+                 <h3 className="text-lg font-semibold mb-4">Kelola Mata Pelajaran</h3>
+                 <div className="flex gap-4 mb-6">
+                    <input type="text" placeholder="Nama Mata Pelajaran" value={newSubject} onChange={e=>setNewSubject(e.target.value)} className="flex-1 p-2 border rounded-xl" />
+                    <button onClick={handleAddSubject} className="px-4 py-2 bg-blue-600 text-white rounded-xl flex items-center gap-2">Tambah</button>
+                 </div>
+                 <ul className="space-y-2">
+                   {subjects.map(subj => (
+                     <li key={subj.id} className="flex items-center justify-between p-3 bg-slate-50 border rounded-xl">
+                       <span>{subj.nama}</span>
+                       <button onClick={() => handleDeleteSubject(subj.id)} className="text-red-500 hover:bg-red-100 p-2 rounded-lg"><Trash2 size={16}/></button>
+                     </li>
+                   ))}
+                 </ul>
               </div>
             </div>
           )}
@@ -415,7 +566,6 @@ export default function AdminPanel() {
           {activeTab === 'analytics' && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-slate-800">Analytics Dashboard</h2>
-
               <div className="grid md:grid-cols-3 gap-6 mb-8">
                 <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100">
                   <h4 className="text-blue-600 text-sm font-semibold mb-2">Total Data Masuk</h4>
@@ -436,7 +586,6 @@ export default function AdminPanel() {
                   </p>
                 </div>
               </div>
-
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
                 <h3 className="text-lg font-semibold mb-6">Distribusi Nilai Rata-rata</h3>
                 <div className="h-80 w-full">

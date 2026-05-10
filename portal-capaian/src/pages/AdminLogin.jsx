@@ -4,8 +4,8 @@ import { supabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
 import { Lock, Mail, AlertCircle, LogIn } from 'lucide-react';
 
-export default function Login() {
-  const [username, setUsername] = useState('');
+export default function AdminLogin() {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,19 +17,28 @@ export default function Login() {
     setError('');
 
     try {
-      const { data, error } = await supabase
-        .from('usercapaian')
-        .select('*')
-        .eq('username', username)
-        .eq('password', password)
-        .single();
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      if (error || !data) {
-        throw new Error('Login gagal. Username atau password salah.');
+      if (error) {
+        throw error;
       }
 
-      localStorage.setItem('student_session', JSON.stringify(data));
-      navigate('/dashboard');
+      // Check role to redirect to admin vs dashboard
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', data.user.id)
+        .single();
+
+      if (!userError && userData?.role === 'admin') {
+        navigate('/admin-panel');
+      } else {
+        await supabase.auth.signOut();
+        throw new Error('Gunakan halaman /login untuk login siswa.');
+      }
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
@@ -59,8 +68,8 @@ export default function Login() {
             >
               <LogIn size={32} />
             </motion.div>
-            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Portal Capaian</h2>
-            <p className="text-slate-400 text-sm">Masuk untuk melihat hasil ujian</p>
+            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Admin Portal</h2>
+            <p className="text-slate-400 text-sm">Masuk ke Panel Admin</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
@@ -76,7 +85,7 @@ export default function Login() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Username</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Email atau NIS</label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Mail size={18} className="text-slate-500" />
@@ -84,10 +93,10 @@ export default function Login() {
                 <input
                   type="text"
                   required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                  placeholder="Masukkan username"
+                  placeholder="Masukkan email / NIS"
                 />
               </div>
             </div>
