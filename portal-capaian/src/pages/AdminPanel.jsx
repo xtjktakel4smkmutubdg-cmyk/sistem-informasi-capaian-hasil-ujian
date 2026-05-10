@@ -73,9 +73,12 @@ export default function AdminPanel() {
         if (resultsData.length > 0) {
           if (resultsData[0].release_at) {
              const d = new Date(resultsData[0].release_at);
-             // Format for datetime-local input: YYYY-MM-DDThh:mm
              const formattedDate = d.toISOString().slice(0, 16);
              setReleaseDate(formattedDate);
+             setIsPublished(d <= new Date());
+          } else {
+             setReleaseDate('');
+             setIsPublished(false);
           }
         }
       }
@@ -144,23 +147,40 @@ export default function AdminPanel() {
 
   const handlePublishToggle = async () => {
     const newState = !isPublished;
-    setIsPublished(newState);
-
-    // In a real scenario, this might update a `settings` table or set release_at to null/past date for all records
-    // Simplified: we'll update the release_at of all results to either a future date (if scheduled) or null/past if immediate
     try {
-        if (newState) {
-            // Publish now -> set release_at to now
-            const nowStr = new Date().toISOString();
-            await supabase.from('results').update({ release_at: nowStr }).neq('id', '00000000-0000-0000-0000-000000000000');
-        } else {
-             // Unpublish -> set release_at to far future or null (if null means hidden in your logic)
-             // Using year 2099 as 'hidden'
-             await supabase.from('results').update({ release_at: '2099-12-31T23:59:59Z' }).neq('id', '00000000-0000-0000-0000-000000000000');
-        }
-        alert(`Status publikasi diubah menjadi: ${newState ? 'Published' : 'Hidden'}`);
+      if (newState) {
+        const nowStr = new Date().toISOString();
+        const { error } = await supabase.from('results').update({ release_at: nowStr }).neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error) throw error;
+        setIsPublished(true);
+        setReleaseDate(nowStr.slice(0, 16));
+        alert('Status publikasi diubah menjadi: Published (Sekarang)');
+      } else {
+        const { error } = await supabase.from('results').update({ release_at: null }).neq('id', '00000000-0000-0000-0000-000000000000');
+        if (error) throw error;
+        setIsPublished(false);
+        setReleaseDate('');
+        alert('Status publikasi diubah menjadi: Hidden');
+      }
     } catch(e) {
-        console.error(e);
+      alert('Error updating publication status: ' + e.message);
+      console.error(e);
+    }
+  };
+
+  const handleScheduleSubmit = async () => {
+    if (!releaseDate) return alert('Silahkan pilih tanggal dan waktu rilis.');
+    try {
+      const scheduleDate = new Date(releaseDate).toISOString();
+      const { error } = await supabase.from('results').update({ release_at: scheduleDate }).neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+
+      const isNowPublished = new Date(releaseDate) <= new Date();
+      setIsPublished(isNowPublished);
+      alert('Jadwal rilis berhasil disimpan: ' + releaseDate);
+    } catch (e) {
+      alert('Error saving schedule: ' + e.message);
+      console.error(e);
     }
   };
 
@@ -339,7 +359,7 @@ export default function AdminPanel() {
                       />
                     </div>
                     <button
-                       onClick={() => alert(`Jadwal diatur ke: ${releaseDate}. (Implementasi simpan ke DB diperlukan)`)}
+                       onClick={handleScheduleSubmit}
                        className="px-6 py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800"
                     >
                       Set Jadwal
