@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { UploadCloud, useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import Papa from 'papaparse';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { motion } from 'framer-motion';
@@ -212,6 +213,38 @@ export default function AdminPanel() {
     } catch(e) { alert('Gagal menghapus: ' + e.message); }
   };
 
+
+  const handleStudentCSVUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const data = results.data.filter(row => row.nama && row.username && row.password);
+        if (data.length === 0) {
+          return alert('Format CSV salah atau file kosong. Pastikan kolom nama, username, dan password ada.');
+        }
+
+        try {
+          const { error } = await supabase.from('usercapaian').insert(data);
+          if (error) throw error;
+
+          alert(`${data.length} siswa berhasil ditambahkan!`);
+          fetchInitialData();
+        } catch (err) {
+          alert('Error saat import CSV: ' + err.message);
+        }
+      },
+      error: (error) => {
+        alert('Error membaca CSV: ' + error.message);
+      }
+    });
+    // Reset file input
+    e.target.value = null;
+  };
+
   // Subject CRUD
   const handleAddSubject = async () => {
     if(!newSubject) return;
@@ -409,6 +442,21 @@ export default function AdminPanel() {
                      <input type="password" placeholder="Password" value={newStudent.password} onChange={e=>setNewStudent({...newStudent, password: e.target.value})} className="flex-1 p-2 rounded border" />
                      <button onClick={handleAddStudent} className="px-4 py-2 bg-blue-600 text-white rounded-xl flex items-center gap-2"><Plus size={16}/> Tambah</button>
                    </div>
+                </div>
+
+
+                <div className="mb-8 p-4 bg-slate-50 rounded-xl border border-slate-200 mt-4">
+                  <h3 className="font-semibold mb-2 text-slate-800 flex items-center gap-2">
+                    <UploadCloud size={18} className="text-emerald-500" />
+                    Bulk Upload Siswa (CSV)
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-4">Upload file CSV dengan header: <b>nama, username, password</b></p>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleStudentCSVUpload}
+                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  />
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-4 mb-6">
