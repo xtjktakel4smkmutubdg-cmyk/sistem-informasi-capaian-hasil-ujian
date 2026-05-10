@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 import { motion } from 'framer-motion';
 import {
   Users, FileSpreadsheet, UploadCloud, Settings,
@@ -37,7 +37,7 @@ export default function AdminPanel() {
       // Check auth
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        navigate('/login');
+        navigate('/admin');
         return;
       }
 
@@ -48,7 +48,7 @@ export default function AdminPanel() {
         .single();
 
       if (userData?.role !== 'admin') {
-        navigate('/dashboard');
+        navigate('/login');
         return;
       }
       // Assuming simple admin check or separate route for now
@@ -208,7 +208,7 @@ export default function AdminPanel() {
         </nav>
         <div className="p-4 border-t border-slate-800">
           <button
-            onClick={() => { supabase.auth.signOut(); navigate('/login'); }}
+            onClick={() => { supabase.auth.signOut(); navigate('/admin'); }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-colors"
           >
             <LogOut size={20} />

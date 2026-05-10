@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
 import { Lock, Mail, AlertCircle, LogIn } from 'lucide-react';
 
-export default function Login() {
+export default function AdminLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -34,10 +34,10 @@ export default function Login() {
         .single();
 
       if (!userError && userData?.role === 'admin') {
-        await supabase.auth.signOut();
-        throw new Error('Gunakan halaman /admin untuk login administrator.');
+        navigate('/admin-panel');
       } else {
-        navigate('/dashboard');
+        await supabase.auth.signOut();
+        throw new Error('Gunakan halaman /login untuk login siswa.');
       }
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.');
@@ -68,8 +68,8 @@ export default function Login() {
             >
               <LogIn size={32} />
             </motion.div>
-            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Portal Capaian</h2>
-            <p className="text-slate-400 text-sm">Masuk untuk melihat hasil ujian</p>
+            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Admin Portal</h2>
+            <p className="text-slate-400 text-sm">Masuk ke Panel Admin</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
