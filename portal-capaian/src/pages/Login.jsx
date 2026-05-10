@@ -17,7 +17,7 @@ export default function Login() {
     setError('');
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -26,9 +26,18 @@ export default function Login() {
         throw error;
       }
 
-      // Check role/metadata if needed to redirect to admin vs dashboard
-      // For now, redirect to dashboard as a default
-      navigate('/dashboard');
+      // Check role to redirect to admin vs dashboard
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', data.user.id)
+        .single();
+
+      if (!userError && userData?.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
