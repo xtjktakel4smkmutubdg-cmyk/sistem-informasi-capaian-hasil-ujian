@@ -40,6 +40,17 @@ export default function AdminPanel() {
         navigate('/login');
         return;
       }
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+
+      if (userData?.role !== 'admin') {
+        navigate('/dashboard');
+        return;
+      }
       // Assuming simple admin check or separate route for now
 
       // Fetch users (students)
