@@ -1,4 +1,4 @@
-import { UploadCloud, useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
@@ -33,6 +33,7 @@ export default function AdminPanel() {
   // Management State
   const [searchQuery, setSearchQuery] = useState('');
   const [newStudent, setNewStudent] = useState({ nama: '', username: '', password: '' });
+  const [csvText, setCsvText] = useState('');
 
   // Settings State
   const [newSubject, setNewSubject] = useState('');
@@ -214,35 +215,43 @@ export default function AdminPanel() {
   };
 
 
-  const handleStudentCSVUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const handleBulkImportSubmit = () => {
+    if (!csvText.trim()) return alert('Data CSV kosong.');
 
-    Papa.parse(file, {
-      header: true,
+    Papa.parse(csvText, {
+      header: false,
       skipEmptyLines: true,
       complete: async (results) => {
-        const data = results.data.filter(row => row.nama && row.username && row.password);
-        if (data.length === 0) {
-          return alert('Format CSV salah atau file kosong. Pastikan kolom nama, username, dan password ada.');
+        const rows = results.data;
+        const validData = rows.map(row => {
+          const nama = row[0]?.trim();
+          const username = row[1]?.trim();
+          if (!nama || !username) return null;
+          return {
+            nama,
+            username,
+            password: row[2]?.trim() || 'password123',
+            kelas: row[3]?.trim() || null,
+            no_peserta: row[4]?.trim() || null,
+          };
+        }).filter(Boolean);
+
+        if (validData.length === 0) {
+          return alert('Format tidak valid. Pastikan setidaknya Nama dan Username ada.');
         }
 
         try {
-          const { error } = await supabase.from('usercapaian').insert(data);
+          const { error } = await supabase.from('usercapaian').insert(validData);
           if (error) throw error;
 
-          alert(`${data.length} siswa berhasil ditambahkan!`);
+          alert(`${validData.length} siswa berhasil ditambahkan!`);
+          setCsvText('');
           fetchInitialData();
         } catch (err) {
-          alert('Error saat import CSV: ' + err.message);
+          alert('Error saat import: ' + err.message);
         }
-      },
-      error: (error) => {
-        alert('Error membaca CSV: ' + error.message);
       }
     });
-    // Reset file input
-    e.target.value = null;
   };
 
   // Subject CRUD
@@ -265,9 +274,9 @@ export default function AdminPanel() {
     } catch(e) { alert('Gagal menghapus: ' + e.message); }
   };
 
-  const filteredResults = results.filter(r =>
-    r.usercapaian?.nama?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    r.usercapaian?.username?.includes(searchQuery)
+  const filteredStudents = students.filter(s =>
+    s.nama?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    s.username?.includes(searchQuery)
   );
 
   const statsData = [
@@ -445,18 +454,45 @@ export default function AdminPanel() {
                 </div>
 
 
-                <div className="mb-8 p-4 bg-slate-50 rounded-xl border border-slate-200 mt-4">
-                  <h3 className="font-semibold mb-2 text-slate-800 flex items-center gap-2">
-                    <UploadCloud size={18} className="text-emerald-500" />
-                    Bulk Upload Siswa (CSV)
-                  </h3>
-                  <p className="text-sm text-slate-500 mb-4">Upload file CSV dengan header: <b>nama, username, password</b></p>
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleStudentCSVUpload}
-                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                  />
+                <div className="mb-8 bg-white border border-slate-200 rounded-xl shadow-sm">
+                  <div className="p-4 border-b border-slate-200 bg-slate-50 rounded-t-xl flex items-center justify-between">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <FileSpreadsheet size={18} className="text-slate-600" />
+                      Bulk Import Siswa
+                    </h3>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div className="bg-blue-50/50 border border-blue-100 rounded-lg p-4">
+                      <p className="text-sm font-medium text-blue-900 mb-2">Format yang didukung (Setiap baris adalah satu pengguna):</p>
+                      <p className="text-sm text-blue-800 font-mono mb-2">Nama Lengkap, Username, Password, Kelas, No.Peserta</p>
+                      <p className="text-xs text-blue-700 opacity-80">* Kolom Password, Kelas, dan No.Peserta opsional. Default password: password123</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-2">Data CSV (Paste di sini)</label>
+                      <textarea
+                        className="w-full h-32 p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                        placeholder="Ahmad Fauzi, ahmad.fauzi, pass123, XII-IPA-1, 001&#10;Budi Santoso, budi.santoso, pass123, XII-IPA-1, 002"
+                        value={csvText}
+                        onChange={(e) => setCsvText(e.target.value)}
+                      ></textarea>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        onClick={() => setCsvText('')}
+                        className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium"
+                      >
+                        Tutup
+                      </button>
+                      <button
+                        onClick={handleBulkImportSubmit}
+                        className="px-4 py-2 bg-blue-400/90 hover:bg-blue-500 text-white rounded-lg transition-colors text-sm font-medium"
+                      >
+                        Mulai Import
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -483,18 +519,20 @@ export default function AdminPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredResults.map((result) => (
-                        <tr key={result.id} className="border-b border-slate-100 hover:bg-slate-50">
-                          <td className="py-3 px-4 font-medium text-slate-800">{result.usercapaian?.nama}</td>
-                          <td className="py-3 px-4 text-slate-600">{result.usercapaian?.username}</td>
-                          <td className="py-3 px-4 text-slate-800 font-semibold">{result.average_score}</td>
+                      {filteredStudents.map((student) => {
+                        const studentResult = results.find(r => r.user_id === student.id);
+                        return (
+                        <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="py-3 px-4 font-medium text-slate-800">{student.nama}</td>
+                          <td className="py-3 px-4 text-slate-600">{student.username}</td>
+                          <td className="py-3 px-4 text-slate-800 font-semibold">{studentResult ? studentResult.average_score : '-'}</td>
                           <td className="py-3 px-4">
-                            <button onClick={() => handleDeleteStudent(result.user_id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg">
+                            <button onClick={() => handleDeleteStudent(student.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-lg">
                               <Trash2 size={16} />
                             </button>
                           </td>
                         </tr>
-                      ))}
+                      ) })}
                     </tbody>
                   </table>
                 </div>
