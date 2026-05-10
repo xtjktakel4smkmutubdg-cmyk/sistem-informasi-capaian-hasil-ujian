@@ -5,7 +5,7 @@ import { motion } from 'framer-motion';
 import { Lock, Mail, AlertCircle, LogIn } from 'lucide-react';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,28 +17,19 @@ export default function Login() {
     setError('');
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      // Check role to redirect to admin vs dashboard
-      const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('role')
-        .eq('id', data.user.id)
+      const { data, error } = await supabase
+        .from('usercapaian')
+        .select('*')
+        .eq('username', username)
+        .eq('password', password)
         .single();
 
-      if (!userError && userData?.role === 'admin') {
-        await supabase.auth.signOut();
-        throw new Error('Gunakan halaman /admin untuk login administrator.');
-      } else {
-        navigate('/dashboard');
+      if (error || !data) {
+        throw new Error('Login gagal. Username atau password salah.');
       }
+
+      localStorage.setItem('student_session', JSON.stringify(data));
+      navigate('/dashboard');
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
@@ -85,7 +76,7 @@ export default function Login() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">Email atau NIS</label>
+              <label className="block text-sm font-medium text-slate-300 mb-2">Username</label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Mail size={18} className="text-slate-500" />
@@ -93,10 +84,10 @@ export default function Login() {
                 <input
                   type="text"
                   required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="block w-full pl-11 pr-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                  placeholder="Masukkan email / NIS"
+                  placeholder="Masukkan username"
                 />
               </div>
             </div>
