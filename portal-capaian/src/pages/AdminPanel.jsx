@@ -40,6 +40,17 @@ export default function AdminPanel() {
         navigate('/login');
         return;
       }
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', session.user.id)
+        .single();
+
+      if (userData?.role !== 'admin') {
+        navigate('/dashboard');
+        return;
+      }
       // Assuming simple admin check or separate route for now
 
       // Fetch users (students)
@@ -169,7 +180,7 @@ export default function AdminPanel() {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col hidden md:flex shrink-0">
+      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0">
         <div className="p-6 border-b border-slate-800">
           <h1 className="text-xl font-bold text-white flex items-center gap-2">
             <Settings size={24} className="text-blue-500" />
